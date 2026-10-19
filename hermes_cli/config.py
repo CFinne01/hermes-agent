@@ -1479,20 +1479,8 @@ def _env_expand_match(m: re.Match) -> str:
     if val is not None:
         return val
     if inner.startswith("env:"):
-        # LOCAL PATCH (2026-10-18, EchoLimits): this module is imported during early bootstrap and
-        # ``_inject_profile_env_vars()`` (module scope, below) expands config.yaml refs before
-        # ``load_hermes_dotenv()`` has run -- so a ref that resolves perfectly well still logged
-        # "is not set" on every CLI invocation. Warn only once the env has actually been loaded;
-        # before that this is a bootstrap-ordering artifact, not a missing credential. A real
-        # post-load miss is unaffected. See hermes_cli.env_loader._DOTENV_LOAD_COMPLETED.
-        try:
-            from hermes_cli.env_loader import dotenv_load_completed
-            _env_ready = dotenv_load_completed()
-        except Exception:
-            _env_ready = True  # can't tell -- fail toward the louder, original behavior
-        (logger.warning if _env_ready else logger.debug)(
-            "Config ref %r: %s is not set (check ~/.hermes/.env); "
-            "keeping the literal placeholder", raw, name)
+        from hermes_cli.env_loader import log_unresolved_env_ref
+        log_unresolved_env_ref(logger, raw, name)
     return raw
 
 
