@@ -91,6 +91,18 @@ def dotenv_load_completed() -> bool:
     return _DOTENV_LOAD_COMPLETED
 
 
+def _mark_dotenv_load_completed() -> None:
+    """Flip the gate for the ``${env:...}`` 'not set' warning. Called at every return
+    path of ``load_hermes_dotenv``: the private bootstrap worker (credentials supplied
+    explicitly), the multiplex early return (``hydrate_profile_secret_sources`` ran),
+    and the normal end-of-flow (user .env + project .env + .op.env + external secret
+    sources + managed env all considered). Means 'a load pass has run', not 'a user
+    .env file existed' -- deployments that supply credentials only through shell exports,
+    external secret sources or managed env still want post-load misses to warn."""
+    global _DOTENV_LOAD_COMPLETED
+    _DOTENV_LOAD_COMPLETED = True
+
+
 def log_unresolved_env_ref(logger_, raw: str, name: str) -> None:
     """Report a ``${env:VAR}`` ref that resolved to nothing, at a level that matches what it means.
 
@@ -690,6 +702,7 @@ def load_hermes_dotenv(
     # The private bootstrap supplies credentials explicitly; do not rehydrate
     # profile behavior, external secret plugins, or managed env in this worker.
     if worker_config_snapshot() is not None:
+        _mark_dotenv_load_completed()  # private bootstrap supplies credentials explicitly
         return []
     # Process home on purpose (never the per-turn override): a startup .env load must not follow a routed
     # profile — see the multiplex guard below.
@@ -722,6 +735,7 @@ def load_hermes_dotenv(
 
             if not _early_recovery._should_skip_external_secret_sources():
                 hydrate_profile_secret_sources(home_path)
+        _mark_dotenv_load_completed()  # multiplex load path: hydration (if any) is the load pass
         return []
 
     loaded: list[Path] = []
@@ -742,8 +756,6 @@ def load_hermes_dotenv(
         _sanitize_env_file_if_needed(project_env_path)
 
     if user_env.exists() and _load_user_dotenv(user_env, load_pass=load_pass):
-        global _DOTENV_LOAD_COMPLETED
-        _DOTENV_LOAD_COMPLETED = True
         loaded.append(user_env)
         _clear_known_keys_missing_from_dotenv(user_env)  # mirrors reload_env(): inherited keys must not leak
 
@@ -809,6 +821,7 @@ def load_hermes_dotenv(
     # to the stale .env value mid-session (#29186, #67323).
     _reapply_terminal_config_bridge(home_path)
 
+    _mark_dotenv_load_completed()
     return loaded
 
 

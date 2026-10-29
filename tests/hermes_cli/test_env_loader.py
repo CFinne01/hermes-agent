@@ -644,6 +644,30 @@ def test_dotenv_load_marks_the_env_as_loaded(tmp_path, monkeypatch):
     assert env_loader.dotenv_load_completed() is True
 
 
+def test_dotenv_load_marks_completed_even_without_user_env(tmp_path, monkeypatch):
+    """A deployment that supplies credentials through other channels (shell exports,
+    external secret sources, managed env) has no ``~/.hermes/.env``; the gate must still
+    flip at the end of the load pass so genuine post-load misses warn instead of being
+    debug-level forever. The earlier shape set the flag only inside the user-``.env``
+    branch, which meant every such deployment silently demoted real missing-credential
+    warnings for the lifetime of the process. See PR #141310 review by @Enough1122.
+    """
+    from hermes_cli import env_loader
+
+    monkeypatch.setattr(env_loader, "_DOTENV_LOAD_COMPLETED", False)
+    home = tmp_path / "hermes-no-user-env"
+    home.mkdir()
+    # Deliberately no .env.
+    assert not (home / ".env").exists()
+
+    assert env_loader.dotenv_load_completed() is False
+
+    loaded = load_hermes_dotenv(hermes_home=home, load_external_secrets=False)
+
+    assert loaded == []
+    assert env_loader.dotenv_load_completed() is True
+
+
 def test_unresolved_config_ref_stays_quiet_until_the_dotenv_load_has_run(monkeypatch, caplog):
     """A ref that resolves fine must not warn during early bootstrap.
 
